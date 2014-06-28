@@ -21,6 +21,9 @@
 static AVCaptureVideoOrientation CDZVideoOrientationFromInterfaceOrientation(UIInterfaceOrientation interfaceOrientation)
 {
     switch (interfaceOrientation) {
+#ifdef __IPHONE_8_0
+        case UIInterfaceOrientationUnknown:
+#endif
         case UIInterfaceOrientationPortrait:
             return AVCaptureVideoOrientationPortrait;
             break;
