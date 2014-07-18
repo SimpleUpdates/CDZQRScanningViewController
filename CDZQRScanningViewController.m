@@ -96,7 +96,7 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
         self.errorBlock = ^(NSError *error) {
             CDZStrongSelf sSelf = wSelf;
             if (sSelf.cancelBlock) {
-                [self.avSession stopRunning];
+                [sSelf.avSession stopRunning];
                 sSelf.cancelBlock();
             }
         };
