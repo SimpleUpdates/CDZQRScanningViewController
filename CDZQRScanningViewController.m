@@ -134,7 +134,7 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
     return [self initWithMetadataObjectTypes:@[ AVMetadataObjectTypeQRCode ] device:cameraDevice completion:completionHandler];
 }
 
-- (instancetype)initCompletion:(CDZQRCompletionHandler)completionHandler
+- (instancetype)initWithCompletion:(CDZQRCompletionHandler)completionHandler
 {
     return [self initWithDevice:CDZQRCameraDeviceBackFacing completion:completionHandler];
 }
@@ -298,7 +298,7 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
             _capturedString = nil;
             [self.avSession startRunning];
         }];
-        
+
         self.completionHandler(result, nil);
     }
 }

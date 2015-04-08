@@ -37,7 +37,7 @@ typedef NS_ENUM(NSInteger, CDZQRCameraDevice) {
 
 - (instancetype)init NS_UNAVAILABLE;
 
-- (instancetype)initCompletion:(CDZQRCompletionHandler)completionHandler;
+- (instancetype)initWithCompletion:(CDZQRCompletionHandler)completionHandler;
 
 - (instancetype)initWithDevice:(CDZQRCameraDevice)cameraDevice
                     completion:(CDZQRCompletionHandler)completionHandler;
