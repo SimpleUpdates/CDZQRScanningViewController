@@ -5,25 +5,13 @@
 //  Copyright (c) 2013 Chris Dzombak. All rights reserved.
 //
 
-#import <AVFoundation/AVFoundation.h>
-#import <dispatch/dispatch.h>
-
 #import "CDZQRScanningViewController.h"
-
-#ifndef CDZWeakSelf
-#define CDZWeakSelf __weak __typeof__((__typeof__(self))self)
-#endif
-
-#ifndef CDZStrongSelf
-#define CDZStrongSelf __typeof__(self)
-#endif
+#import <AVFoundation/AVFoundation.h>
 
 static AVCaptureVideoOrientation CDZVideoOrientationFromInterfaceOrientation(UIInterfaceOrientation interfaceOrientation)
 {
     switch (interfaceOrientation) {
-#ifdef __IPHONE_8_0
         case UIInterfaceOrientationUnknown:
-#endif
         case UIInterfaceOrientationPortrait:
             return AVCaptureVideoOrientationPortrait;
             break;
@@ -44,88 +32,153 @@ static const NSTimeInterval CDZQRScanningTorchActivationDelay = 0.25;
 
 NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontroller";
 
-@interface CDZQRScanningViewController () <AVCaptureMetadataOutputObjectsDelegate>
 
-@property (nonatomic, strong) AVCaptureSession *avSession;
-@property (nonatomic, strong) AVCaptureDevice *captureDevice;
-@property (nonatomic, strong) AVCaptureVideoPreviewLayer *previewLayer;
 
-@property (nonatomic, copy) NSString *lastCapturedString;
+@interface _CDZQRResult : NSObject <CDZQRResult>
 
-@property (nonatomic, strong, readwrite) NSArray *metadataObjectTypes;
+@property (nonatomic, readonly) NSString *capturedString;
+@property (nonatomic, copy, readonly) dispatch_block_t resumeHandler;
+
+- (instancetype)initWithResult:(NSString *)result resumeHandler:(dispatch_block_t)resumeHandler;
 
 @end
 
-@implementation CDZQRScanningViewController
+@implementation _CDZQRResult
 
-- (instancetype)initWithMetadataObjectTypes:(NSArray *)metadataObjectTypes {
-    self = [super init];
-    if (!self) return nil;
-    self.metadataObjectTypes = metadataObjectTypes;
-    self.title = NSLocalizedString(@"Scan QR Code", nil);
+- (instancetype)initWithResult:(NSString *)result resumeHandler:(dispatch_block_t)resumeHandler
+{
+    if (self = [super init]) {
+        _capturedString = result;
+        _resumeHandler = resumeHandler;
+    }
     return self;
 }
 
-- (instancetype)init {
-    return [self initWithMetadataObjectTypes:@[ AVMetadataObjectTypeQRCode ]];
+- (void)resumeScanning
+{
+    self.resumeHandler();
 }
 
-- (void)viewDidLoad {
+@end
+
+
+@interface CDZQRScanningViewController () <AVCaptureMetadataOutputObjectsDelegate>
+
+@property (nonatomic, readonly) NSMutableArray *overallCapturedStrings;
+
+@property (nonatomic, readonly) AVCaptureSession *avSession;
+@property (nonatomic, readonly) AVCaptureDevice *captureDevice;
+@property (nonatomic, readonly) AVCaptureVideoPreviewLayer *previewLayer;
+
+@end
+
+
+
+@implementation CDZQRScanningViewController
+
++ (AVCaptureDevice *)frontFacingCamera
+{
+    for (AVCaptureDevice *device in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo]) {
+        if (device.position == AVCaptureDevicePositionFront) {
+            return device;
+        }
+    }
+
+    return [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+}
+
++ (AVCaptureDevice *)backFacingCamera
+{
+    for (AVCaptureDevice *device in [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo]) {
+        if (device.position == AVCaptureDevicePositionBack) {
+            return device;
+        }
+    }
+
+    return [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+}
+
+- (instancetype)initWithMetadataObjectTypes:(NSArray *)metadataObjectTypes
+                                     device:(CDZQRCameraDevice)cameraDevice
+                                 completion:(CDZQRCompletionHandler)completionHandler
+{
+    if (self = [super init]) {
+        self.title = NSLocalizedString(@"Scan QR Code", @"");
+
+        _metadataObjectTypes = metadataObjectTypes;
+        _avSession = [[AVCaptureSession alloc] init];
+        _completionHandler = completionHandler;
+        _overallCapturedStrings = [NSMutableArray array];
+
+        AVCaptureDevice *captureDevice = nil;
+        switch (cameraDevice) {
+            case CDZQRCameraDeviceFrontFacing:
+                captureDevice = [CDZQRScanningViewController frontFacingCamera];
+                break;
+            case CDZQRCameraDeviceBackFacing:
+                captureDevice = [CDZQRScanningViewController backFacingCamera];
+        }
+
+        _captureDevice = captureDevice;
+        if ([_captureDevice isLowLightBoostSupported] && [_captureDevice lockForConfiguration:nil]) {
+            _captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = YES;
+            [_captureDevice unlockForConfiguration];
+        }
+    }
+    return self;
+}
+
+- (instancetype)initWithDevice:(CDZQRCameraDevice)cameraDevice
+                    completion:(CDZQRCompletionHandler)completionHandler
+{
+    return [self initWithMetadataObjectTypes:@[ AVMetadataObjectTypeQRCode ] device:cameraDevice completion:completionHandler];
+}
+
+- (instancetype)initCompletion:(CDZQRCompletionHandler)completionHandler
+{
+    return [self initWithDevice:CDZQRCameraDeviceBackFacing completion:completionHandler];
+}
+
+- (void)dealloc
+{
+    [self.avSession stopRunning];
+}
+
+- (void)loadView
+{
+    [super loadView];
+
+    _previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:self.avSession];
+    _previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+    _previewLayer.frame = self.view.bounds;
+    [self.view.layer addSublayer:_previewLayer];
+}
+
+- (void)viewDidLoad
+{
     [super viewDidLoad];
 
     self.view.backgroundColor = [UIColor blackColor];
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(_cancelTapped:)];
 
     UILongPressGestureRecognizer *torchGestureRecognizer = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(handleTorchRecognizerTap:)];
     torchGestureRecognizer.minimumPressDuration = CDZQRScanningTorchActivationDelay;
     [self.view addGestureRecognizer:torchGestureRecognizer];
-}
-
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-
-    if (self.cancelBlock) {
-        self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemCancel target:self action:@selector(cancelItemSelected:)];
-    } else {
-        self.navigationItem.leftBarButtonItem = nil;
-    }
-
-    self.lastCapturedString = nil;
-
-    if (self.cancelBlock && !self.errorBlock) {
-        CDZWeakSelf wSelf = self;
-        self.errorBlock = ^(NSError *error) {
-            CDZStrongSelf sSelf = wSelf;
-            if (sSelf.cancelBlock) {
-                [sSelf.avSession stopRunning];
-                sSelf.cancelBlock();
-            }
-        };
-    }
-
-    self.avSession = [[AVCaptureSession alloc] init];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        self.captureDevice = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if ([self.captureDevice isLowLightBoostSupported] && [self.captureDevice lockForConfiguration:nil]) {
-            self.captureDevice.automaticallyEnablesLowLightBoostWhenAvailable = YES;
-            [self.captureDevice unlockForConfiguration];
-        }
-
         [self.avSession beginConfiguration];
 
         NSError *error = nil;
         AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:self.captureDevice error:&error];
-        if (input) {
+        if (input && [self.avSession canAddInput:input]) {
             [self.avSession addInput:input];
         } else {
             NSLog(@"QRScanningViewController: Error getting input device: %@", error);
             [self.avSession commitConfiguration];
-            if (self.errorBlock) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self.avSession stopRunning];
-                    self.errorBlock(error);
-                });
-            }
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.completionHandler(nil, error);
+            });
             return;
         }
 
@@ -133,12 +186,13 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
         [self.avSession addOutput:output];
         for (NSString *type in self.metadataObjectTypes) {
             if (![output.availableMetadataObjectTypes containsObject:type]) {
-                if (self.errorBlock) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [self.avSession stopRunning];
-                        self.errorBlock([NSError errorWithDomain:CDZQRScanningErrorDomain code:CDZQRScanningViewControllerErrorUnavailableMetadataObjectType userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Unable to scan object of type %@", type]}]);
-                    });
-                }
+                [self.avSession commitConfiguration];
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSDictionary *userInfo = @{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Unable to scan object of type %@", type] };
+                    NSError *error = [NSError errorWithDomain:CDZQRScanningErrorDomain code:CDZQRScanningViewControllerErrorUnavailableMetadataObjectType userInfo:userInfo];
+                    self.completionHandler(nil, error);
+                });
                 return;
             }
         }
@@ -149,31 +203,16 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
         [self.avSession commitConfiguration];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.previewLayer.connection.isVideoOrientationSupported) {
-                self.previewLayer.connection.videoOrientation = CDZVideoOrientationFromInterfaceOrientation([UIApplication sharedApplication].statusBarOrientation);
-            }
+            [self.view setNeedsLayout];
+            [self.view layoutIfNeeded];
 
             [self.avSession startRunning];
         });
     });
-
-    self.previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:self.avSession];
-    self.previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
-    self.previewLayer.frame = self.view.bounds;
-    [self.view.layer addSublayer:self.previewLayer];
 }
 
-- (void)viewDidDisappear:(BOOL)animated {
-    [super viewDidDisappear:animated];
-
-    [self.previewLayer removeFromSuperlayer];
-    self.previewLayer = nil;
-    [self.avSession stopRunning];
-    self.avSession = nil;
-    self.captureDevice = nil;
-}
-
-- (void)viewDidLayoutSubviews {
+- (void)viewDidLayoutSubviews
+{
     [super viewDidLayoutSubviews];
 
     CGRect layerRect = self.view.bounds;
@@ -187,60 +226,80 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
 
 #pragma mark - UI Actions
 
-- (void)cancelItemSelected:(id)sender {
-    [self.avSession stopRunning];
-    if (self.cancelBlock) self.cancelBlock();
+- (void)_cancelTapped:(UIBarButtonItem *)sender
+{
+    self.completionHandler(nil, nil);
 }
 
-- (void)handleTorchRecognizerTap:(UIGestureRecognizer *)sender {
+#pragma mark - Torch
+
+- (void)handleTorchRecognizerTap:(UIGestureRecognizer *)sender
+{
     switch(sender.state) {
         case UIGestureRecognizerStateBegan:
-            [self turnTorchOn];
+            [self _turnTorchOn];
             break;
         case UIGestureRecognizerStateChanged:
         case UIGestureRecognizerStatePossible:
             // no-op
             break;
-        case UIGestureRecognizerStateRecognized: // also UIGestureRecognizerStateEnded
+        case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateFailed:
         case UIGestureRecognizerStateCancelled:
-            [self turnTorchOff];
+            [self _turnTorchOff];
             break;
     }
 }
 
-#pragma mark - Torch
-
-- (void)turnTorchOn {
+- (void)_turnTorchOn
+{
     if (self.captureDevice.hasTorch && self.captureDevice.torchAvailable && [self.captureDevice isTorchModeSupported:AVCaptureTorchModeOn] && [self.captureDevice lockForConfiguration:nil]) {
         [self.captureDevice setTorchModeOnWithLevel:CDZQRScanningTorchLevel error:nil];
         [self.captureDevice unlockForConfiguration];
     }
 }
 
-- (void)turnTorchOff {
+- (void)_turnTorchOff
+{
     if (self.captureDevice.hasTorch && [self.captureDevice isTorchModeSupported:AVCaptureTorchModeOff] && [self.captureDevice lockForConfiguration:nil]) {
         self.captureDevice.torchMode = AVCaptureTorchModeOff;
         [self.captureDevice unlockForConfiguration];
     }
 }
 
+- (void)resumeScanningQRCode
+{
+    _capturedString = nil;
+    [self.avSession startRunning];
+}
+
 #pragma mark - AVCaptureMetadataOutputObjectsDelegate
 
-- (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputMetadataObjects:(NSArray *)metadataObjects fromConnection:(AVCaptureConnection *)connection {
-    NSString *result;
+- (void)captureOutput:(AVCaptureOutput *)captureOutput didOutputMetadataObjects:(NSArray *)metadataObjects fromConnection:(AVCaptureConnection *)connection
+{
+    if (self.capturedString) {
+        return;
+    }
 
-    for (AVMetadataObject *metadata in metadataObjects) {
+    NSString *result = nil;
+    for (AVMetadataMachineReadableCodeObject *metadata in metadataObjects) {
         if ([self.metadataObjectTypes containsObject:metadata.type]) {
-            result = [(AVMetadataMachineReadableCodeObject *)metadata stringValue];
+            result = metadata.stringValue;
             break;
         }
     }
 
-    if (result && ![self.lastCapturedString isEqualToString:result]) {
-        self.lastCapturedString = result;
+    if (result && ![self.overallCapturedStrings containsObject:result]) {
+        _capturedString = result;
+        [self.overallCapturedStrings addObject:result];
         [self.avSession stopRunning];
-        if (self.resultBlock) self.resultBlock(result);
+
+        _CDZQRResult *result = [[_CDZQRResult alloc] initWithResult:_capturedString resumeHandler:^{
+            _capturedString = nil;
+            [self.avSession startRunning];
+        }];
+        
+        self.completionHandler(result, nil);
     }
 }
 
