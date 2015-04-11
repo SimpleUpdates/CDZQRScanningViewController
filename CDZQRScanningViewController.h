@@ -9,6 +9,8 @@
 
 
 
+NS_ASSUME_NONNULL_BEGIN
+
 @protocol CDZQRResult <NSObject>
 
 @property (nonatomic, readonly) NSString *capturedString;
@@ -18,7 +20,7 @@
 
 
 
-typedef void (^CDZQRCompletionHandler)(id<CDZQRResult> result, NSError *error);
+typedef void (^CDZQRCompletionHandler)(__nullable id<CDZQRResult> result, NSError *__nullable error);
 
 extern NSString * const CDZQRScanningErrorDomain;
 
@@ -52,6 +54,8 @@ typedef NS_ENUM(NSInteger, CDZQRCameraDevice) {
  *  An array of `AVMetadataMachineReadableCodeObject`s
  */
 @property (nonatomic, readonly) NSArray *metadataObjectTypes;
-@property (nonatomic, readonly) NSString *capturedString;
+@property (nonatomic, nullable, readonly) NSString *capturedString;
 
 @end
+
+NS_ASSUME_NONNULL_END
