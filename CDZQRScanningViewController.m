@@ -38,18 +38,20 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
 
 @property (nonatomic, readonly) NSString *capturedString;
 @property (nonatomic, copy, readonly) dispatch_block_t resumeHandler;
+@property (nonatomic, copy, readonly) dispatch_block_t resetHandler;
 
-- (instancetype)initWithResult:(NSString *)result resumeHandler:(dispatch_block_t)resumeHandler;
+- (instancetype)initWithResult:(NSString *)result resumeHandler:(dispatch_block_t)resumeHandler resetHandler:(dispatch_block_t)resetHandler;
 
 @end
 
 @implementation _CDZQRResult
 
-- (instancetype)initWithResult:(NSString *)result resumeHandler:(dispatch_block_t)resumeHandler
+- (instancetype)initWithResult:(NSString *)result resumeHandler:(dispatch_block_t)resumeHandler resetHandler:(dispatch_block_t)resetHandler
 {
     if (self = [super init]) {
         _capturedString = result;
         _resumeHandler = resumeHandler;
+		_resetHandler = resetHandler;
     }
     return self;
 }
@@ -57,6 +59,10 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
 - (void)resumeScanning
 {
     self.resumeHandler();
+}
+
+- (void)reset {
+	self.resetHandler();
 }
 
 @end
@@ -297,7 +303,9 @@ NSString * const CDZQRScanningErrorDomain = @"com.cdzombak.qrscanningviewcontrol
         _CDZQRResult *result = [[_CDZQRResult alloc] initWithResult:_capturedString resumeHandler:^{
             _capturedString = nil;
             [self.avSession startRunning];
-        }];
+		} resetHandler:^{
+			[self.overallCapturedStrings removeAllObjects];
+		}];
 
         self.completionHandler(result, nil);
     }
